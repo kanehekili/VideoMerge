@@ -224,6 +224,7 @@ class VideoMerge(QtWidgets.QMainWindow):
         self.merger = Merger(mel,self.mimeHelper.homogenious)
         self.merger.onProgress.connect(self._onMergeProgress)
         self.merger.onStatus.connect(self._showStatus)
+        self.merger.onImpossible.connect(self._noGood)
         targetFile = self.getTargetFile(self.merger)
         if targetFile is None:
             return
@@ -236,7 +237,10 @@ class VideoMerge(QtWidgets.QMainWindow):
 
     def _asyncMerge(self,targetFile):
         self.merger.gatherInfos()
-        self.merger.saveTo(targetFile)  
+        if self.merger.isImpossible():
+            self._showStatus(self.merger.lastError)
+        else:
+            self.merger.saveTo(targetFile)              
     
     def getTargetFile(self,merger):
         targetPath = merger.getTargetPath()
@@ -500,6 +504,10 @@ class VideoAttributes():
         #    return self.NAMES[3]
         return None
     
+    def hasCompatibleRotation(self,otherCA):
+        delta = abs(self.rotation() - otherCA.rotation())
+        return delta != 90 
+    
     def fps(self):
         return self.video.saneFPS()
 
@@ -521,11 +529,13 @@ class VideoAttributes():
 class Merger(QtCore.QObject):
     onProgress = pyqtSignal(int)
     onStatus = pyqtSignal(str) 
+    onImpossible = pyqtSignal(str)
     REG_TIME = re.compile('(time=[ ]*)([0-9:.]+)') #2 groups!
     MODE_FAST=1
     MODE_TS=2
     MODE_REENCODE=3 #...tobe continued
     MODE_ROTATE=4
+    MODE_IMPOSSIBLE=99
     TMP_FILE='/tmp/_merge'
     ROT_FILE='/tmp/_rot'
     
@@ -543,7 +553,7 @@ class Merger(QtCore.QObject):
         self.videoList=[]
         self.totalTime=0
         self.timeCursor=0 #for multi TS operations like rotatate & mux
-
+        self.lastError=None
 
     '''
     Must be the same:
@@ -588,6 +598,9 @@ class Merger(QtCore.QObject):
         self.timeMark=(next(self.timeGen),0) #tuple: time and merge entry index.
         self._refineMuxing()
 
+    def isImpossible(self):
+        return self.conversionMode == self.MODE_IMPOSSIBLE
+
     def _refineMuxing(self):
         #on ts we might have an fps drop!
         if self.conversionMode==self.MODE_REENCODE:
@@ -601,9 +614,17 @@ class Merger(QtCore.QObject):
             val= ca.homogenious(adjacent)
             if val is not None:
                 log.info("Invalid stream value %s : %s - ignoring file %s"%(val,adjacent,adjacent.src)) #TODO cal.value(key)
-                self.onStatus.emit("Different formats - will reencode all")
+                
+                if not ca.hasCompatibleRotation(adjacent):
+                    self.lastError="Portrait and Landscape can't be joined"
+                    self.conversionMode=self.MODE_IMPOSSIBLE
+                    self.onImpossible.emit(self.lastError)
+                    break
+                
                 self.conversionMode=self.MODE_REENCODE #brute force. take the first videoList
+                self.onStatus.emit("Different formats - will reencode all")
                 break
+
             if ca.needsTS():
                 self.conversionMode=self.MODE_TS
                 self.onStatus.emit("Merging with TS filters")

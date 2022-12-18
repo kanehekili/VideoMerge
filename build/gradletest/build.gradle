@@ -1,0 +1,50 @@
+Properties properties = new Properties()
+properties.load(project.file('build.properties').newDataInputStream())
+
+task createStage {
+  println'Configure: Create stage from buildDir: $buildDir'
+  println "Source directory: "+src
+  delete stage
+  mkdir stage
+}
+
+task prep1 {
+  println "Task prep1"
+}
+
+task copyFiles(type: Copy, dependsOn: [prep1]) {
+	from("AUR"){
+      include "*"
+      filter{ it.replaceAll('@xxx@', version),it.replaceAll('@xpkgrelx@', pkgrelease)}
+  }
+
+
+/*
+Steps:
+create stage
+add those files there which a needed:
+VideoMerge.py
+DragnDropTableWidget.py
+from vidocut FFmpegtools.py
+VideoMerge.desktop
+install.sh
+uninstall.sh
+
+tar them
+
+calc md5sum and store it
+
+AUR-template:
+Use PKGBUILD to copy it into AUR folder + replace tokens
+Generate a SCRINFO from pkgbuild infos (by executing makepkg 
+
+DEB-template
+copy and replacetokens the files and tar them. 
+Since gradle uses ant for stuff like this -> ant
+*/
+
+//end
+task buildMerger{
+    dependsOn 'build'
+    doLast{delete stage}
+}

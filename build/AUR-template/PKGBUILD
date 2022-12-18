@@ -1,0 +1,27 @@
+# Maintainer: Kanehekili (mat dot wegmann at gmail dot com)
+pkgname=videomerge
+pkgver=@xxx@
+pkgrel=@xpkgrelx@
+pkgdesc="Simple and fast mp4/matroska/Av1/webm/mp2/mpts Video merger"
+url="https://github.com/kanehekili/VideoMerge"
+license=('GPL2')
+depends=('python-pyqt5' 'ffmpeg')
+arch=('x86_64')
+source=(https://github.com/kanehekili/VideoMerge/releases/download/@xxx@/videomerge@xxx@.tar)
+md5sums=(@md5sum@)
+
+
+package(){	
+  cd ${srcdir}
+  mkdir -p "${pkgdir}/opt/${pkgname}"
+  mkdir -p "${pkgdir}/usr/share/applications"
+  mkdir -p "${pkgdir}/usr/bin"
+  rm $srcdir/$wsp/install.sh
+  rm $srcdir/$wsp/uninstall.sh
+  cp $srcdir/$wsp/VideoMerge.desktop $pkgdir/usr/share/applications
+  cp -r $srcdir/$wsp/* $pkgdir/opt/$pkgname
+  chmod +x ${pkgdir}/opt/${pkgname}/VideoMerge.py
+  ln -s ${pkgdir}/opt/${pkgname}/VideoMerge.py  ${pkgdir}/usr/bin/videomerge
+}
+
+
