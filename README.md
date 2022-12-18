@@ -9,7 +9,7 @@ Supports the (fast) merge of homogenius streams as well as (slower) reencoding d
 ##Features
 VideoMerge tends to have a very simple interface, It detects the best way to concat mp2,mp4,mkv,webm and more containers into one video. 
 
-![Screenshot](https://github.com/kanehekili/VideoMerge/blob/main/Merge.png)
+![Screenshot](https://github.com/kanehekili/VideoMerge/blob/main/Merge1.png)
 
 Different rotated videos will be made "homogenious", see the limitations for more infos. 
 
