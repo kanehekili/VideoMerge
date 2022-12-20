@@ -1,7 +1,7 @@
 # VideoMerge
 Version 1.0.2
 
-![Download](https://github.com/kanehekili/VideoMerge/releases/download/1.0.1/videomerge1.0.2.tar)
+![Download](https://github.com/kanehekili/VideoMerge/releases/download/1.0.2/videomerge1.0.2.tar)
 
 UI Tool to merge different videos using ffmpeg
 Supports the (fast) merge of homogenius streams as well as (slower) reencoding different file formats. 
