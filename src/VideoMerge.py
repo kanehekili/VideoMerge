@@ -1,4 +1,16 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# copyright (c) 2022 kanehekili (mat.wegmann@gmail.com)
+# This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License,
+# as published by the Free Software Foundation, either version 2 of the License, or (at your option) any
+# later version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied
+# warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the  GNU General Public License for more
+# details.
+#
+# You should have received a copy of the  GNU General Public License along with this program.  If not, see
+# <http://www.gnu.org/licenses/>.
 '''
 Created on Apr 16, 2020
 
@@ -15,7 +27,7 @@ import subprocess
 import datetime
 import re
 import FFMPEGTools
-from FFMPEGTools import FFStreamProbe
+from FFMPEGTools import FFStreamProbe,OSTools
 from fractions import Fraction
 import glob
 
@@ -34,11 +46,12 @@ class VideoMerge(QtWidgets.QMainWindow):
         FFMPEGTools.setupRotatingLogger("VideoMerge",debugOptions["logConsole"])
         FFMPEGTools.setLogLevel(debugOptions["level"])  
         log.info("Start session")             
-        self.setWindowIcon(self.getAppIcon())
+        self.setWindowIcon(getAppIcon()) #Titlebar icon only!
         self.mimeHelper = MimeHelper()
         self._generateStatusIcons()
         self.init_ui()
         self.merger=None
+        self.settings=SettingsModel()
     
     def init_ui(self):
         self.setWindowTitle("VideoMerge")
@@ -107,9 +120,6 @@ class VideoMerge(QtWidgets.QMainWindow):
         self.statusIcons = [t1,t2,t3]
         #?self.statusIcons = [QtGui.QIcon(QtCore.QDir.current().absoluteFilePath("/icons/"+name)) for name in ["idleIcon.png", "execIcon.png","doneIcon.png"]]
     
-    def getAppIcon(self):
-        return QtGui.QIcon('icons/merge.png')
-
 
     def init_toolbar(self):
         self.startAction = QtWidgets.QAction(QtGui.QIcon('./icons/start-icon.png'), 'Start Concat', self)
@@ -221,10 +231,9 @@ class VideoMerge(QtWidgets.QMainWindow):
             me = MergeEntry(self.listWidget.items(indx))
             mel.append(me)
             
-        self.merger = Merger(mel,self.mimeHelper.homogenious)
+        self.merger = Merger(mel,self.mimeHelper.homogenious,self.settings)
         self.merger.onProgress.connect(self._onMergeProgress)
         self.merger.onStatus.connect(self._showStatus)
-        self.merger.onImpossible.connect(self._noGood)
         targetFile = self.getTargetFile(self.merger)
         if targetFile is None:
             return
@@ -237,10 +246,7 @@ class VideoMerge(QtWidgets.QMainWindow):
 
     def _asyncMerge(self,targetFile):
         self.merger.gatherInfos()
-        if self.merger.isImpossible():
-            self._showStatus(self.merger.lastError)
-        else:
-            self.merger.saveTo(targetFile)              
+        self.merger.saveTo(targetFile)              
     
     def getTargetFile(self,merger):
         targetPath = merger.getTargetPath()
@@ -257,7 +263,7 @@ class VideoMerge(QtWidgets.QMainWindow):
         self.merger.interrupt()
     
     def openMediaSettings(self):
-        dlg = SettingsDialog(self, None) #no model yet: self.settings)
+        dlg = SettingsDialog(self, self.settings) 
         dlg.show()  
     
     def addURL(self,path):
@@ -302,7 +308,7 @@ class SettingsModel(QtCore.QObject):
         # keep flags- save them later
         super(SettingsModel, self).__init__()
         self.reencode=False
-        self.rotation=False
+        self.noRotation=False
              
         
 class SettingsDialog(QtWidgets.QDialog):
@@ -324,13 +330,15 @@ class SettingsDialog(QtWidgets.QDialog):
         encodeBox = QtWidgets.QVBoxLayout(frame1)
         self.check_reencode = QtWidgets.QCheckBox("Force Reencode (Slow!)")
         self.check_reencode.setToolTip("Reencode the files. Might take longer")
-        #self.check_reencode.setChecked(self.model.reencoding)#session data .must not be saved...
+        self.check_reencode.setChecked(self.model.reencode)#session data .must not be saved...
+        self.check_reencode.stateChanged.connect(self.on_reencodeChanged)
         encodeBox.addWidget(self.check_reencode)
 
         self.check_rotation = QtWidgets.QCheckBox("Ignore rotation information")
         self.check_rotation.setToolTip("Ignore the roation infos. Might lead to funny results")
         encodeBox.addWidget(self.check_rotation)
-        #self.check_reencode.setChecked(self.model.rotation)
+        self.check_rotation.setChecked(self.model.noRotation)
+        self.check_rotation.stateChanged.connect(self.on_rotationChanged)
         outBox = QtWidgets.QVBoxLayout()
         # outBox.addStretch(1)
         self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
@@ -348,6 +356,13 @@ class SettingsDialog(QtWidgets.QDialog):
         # make it wider...
         self.setMinimumSize(400, 0)
         
+    def on_reencodeChanged(self, reencode):
+        self.model.reencode = QtCore.Qt.Checked == reencode
+
+    def on_rotationChanged(self, rotation):
+        self.model.noRotation = QtCore.Qt.Checked == rotation
+
+        
 class LongRunningOperation(QtCore.QThread):
     finished = pyqtSignal() 
     noGood= pyqtSignal(str)
@@ -364,7 +379,7 @@ class LongRunningOperation(QtCore.QThread):
             #Log.logException("***Error in LongRunningOperation***")
             #self.msg = "Error while converting: "+str(ex)
             self.noGood.emit(str(ex))
-            traceback.print_exc(file=sys.stdout)
+            log.exception("Merge failure")
         finally:
             self.finished.emit()
             self.quit()
@@ -529,7 +544,6 @@ class VideoAttributes():
 class Merger(QtCore.QObject):
     onProgress = pyqtSignal(int)
     onStatus = pyqtSignal(str) 
-    onImpossible = pyqtSignal(str)
     REG_TIME = re.compile('(time=[ ]*)([0-9:.]+)') #2 groups!
     MODE_FAST=1
     MODE_TS=2
@@ -539,7 +553,7 @@ class Merger(QtCore.QObject):
     TMP_FILE='/tmp/_merge'
     ROT_FILE='/tmp/_rot'
     
-    def __init__(self,mergeEntryList,fastMode):
+    def __init__(self,mergeEntryList,fastMode,settings):
         super(Merger, self).__init__()
         self.runningProcess=None
         self.mergeList=mergeEntryList
@@ -548,12 +562,12 @@ class Merger(QtCore.QObject):
         self.timeMark=None
         self.processed=0
         #self.fastMode=fastMode #either fast or needs to reencode
-        self.conversionMode=self.MODE_FAST if fastMode else self.MODE_REENCODE
+        self.conversionMode=self.MODE_FAST if fastMode and not settings.reencode else self.MODE_REENCODE
         self.errors=[]
         self.videoList=[]
         self.totalTime=0
         self.timeCursor=0 #for multi TS operations like rotatate & mux
-        self.lastError=None
+        self.settings=settings
 
     '''
     Must be the same:
@@ -615,10 +629,9 @@ class Merger(QtCore.QObject):
             if val is not None:
                 log.info("Invalid stream value %s : %s - ignoring file %s"%(val,adjacent,adjacent.src)) #TODO cal.value(key)
                 
-                if not ca.hasCompatibleRotation(adjacent):
-                    self.lastError="Portrait and Landscape can't be joined"
-                    self.conversionMode=self.MODE_IMPOSSIBLE
-                    self.onImpossible.emit(self.lastError)
+                if not ca.hasCompatibleRotation(adjacent) and self.autoRotate():
+                    self.errors.append("Portrait and Landscape can't be joined")
+                    self.validateDone()
                     break
                 
                 self.conversionMode=self.MODE_REENCODE #brute force. take the first videoList
@@ -630,6 +643,8 @@ class Merger(QtCore.QObject):
                 self.onStatus.emit("Merging with TS filters")
                 break
 
+    def autoRotate(self):
+        return not self.settings.noRotation 
     
     def healFPS(self,ref,instance):
         pass #iterate throught the fps and get the most sane one
@@ -646,8 +661,6 @@ class Merger(QtCore.QObject):
                 self.commandReencodeMP4Eloquent(targetFile)
             elif self.conversionMode==self.MODE_TS:
                 self.processTS(targetFile)    
-            #elif self.conversionMode==self.MODE_ROTATE:
-            #    self.processRotationStuff(targetFile)
             else:
                 with open(mergeFile,'w') as aFile:
                     aFile.write('ffconcat version 1.0\n') 
@@ -696,7 +709,8 @@ class Merger(QtCore.QObject):
             cmdString.append("scale="+prim.width()+":"+prim.height())
             cmdString.append(",setdar="+str(darMode.numerator)+"/"+str(darMode.denominator)+",")
             cmdString.append("fps="+str(prim.fps())+",")
-            cmdString.append("rotate="+str(prim.rotation()))
+            rot = str(prim.rotation()) if self.autoRotate() else "0"
+            cmdString.append("rotate="+rot)
             cmdString.append("[v")
             cmdString.append(str(indx))
             cmdString.append("]; ")
@@ -734,7 +748,7 @@ class Merger(QtCore.QObject):
             tmpFiles.append(tempFile)
             fnr+=1
             srcFile =ca.src
-            if ca.rotation()!=0:
+            if ca.rotation()!=0 and self.autoRotate():
                 cmd=['ffmpeg', "-hide_banner", "-y",'-i',ca.src,"-vf","rotate=0",rotFile]
                 self._runCommand(cmd, "Rotate",self.timeCursor)# 
                 srcFile=rotFile
@@ -896,6 +910,9 @@ T: 00:00:04.07 index:0 cursor: 4 END:187 list:187,206 proz:1
         log.warning("Warning:%s",text) 
         
 
+def getAppIcon():
+    return QtGui.QIcon('icons/merge.png')
+
 def excepthook(exc_type, exc_value, exc_tb):
     tb = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
     log.error("Application failure:\n %s", tb)
@@ -925,8 +942,11 @@ def parseOptions(args):
 def main():
     try:
         sys.excepthook = excepthook
-        #setCurrentWorkingDirectory()
+        folder = OSTools().getLocalPath(__file__)
+        #find your files and icons:
+        OSTools().setMainWorkDir(folder)
         app = QApplication(sys.argv)
+        app.setWindowIcon(getAppIcon())
         res = parseOptions(sys.argv)
         win = VideoMerge(res)
         
