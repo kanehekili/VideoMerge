@@ -56,7 +56,14 @@ Merging videos is complex, since there are many variations. If you encounter a p
 
 
 ### Arch Linux
- TODO
+#### Install VideomERGE via AUR - Arch Linux and derivates only(Manjaor/Endeavour) 
+* Use pamac or other GUI tools, search for "videomerge" in AUR, click install
+* Manually :
+    * Download [PKGBUILD ](https://aur.archlinux.org/cgit/aur.git/tree/PKGBUILD?h=videomerge)
+    * unpack it and go into the "videomerge" folder
+    * execute `makepkg -s`
+    * excute `sudo pacman -U videomerge-1.x.x.x-1-x86_64.pkg.tar.zst` 
+    * uninstall via `sudo pacman -Rs videomerge`
 
 ### Ubuntu and Debian
  TODO
