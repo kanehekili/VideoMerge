@@ -65,8 +65,12 @@ Merging videos is complex, since there are many variations. If you encounter a p
     * excute `sudo pacman -U videomerge-1.x.x.x-1-x86_64.pkg.tar.zst` 
     * uninstall via `sudo pacman -Rs videomerge`
 
-### Ubuntu and Debian
- TODO
+### Ubuntu, LinuxMint and Debian via ppa (only focal and jammy)
+```
+sudo add-apt-repository ppa:jentiger-moratai/mediatools
+sudo apt update
+sudo apt install --no-install-recommends install videomerge
+```
 
 ## Changes
 20.12.2022
