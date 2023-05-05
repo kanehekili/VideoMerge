@@ -3,12 +3,16 @@ Created on May 24, 2020
 
 @author: matze
 '''
-from PyQt5 import QtGui,QtWidgets,QtCore
-from PyQt5.QtCore import pyqtSignal
+#from PyQt5 import QtGui,QtWidgets,QtCore
+#from PyQt5.QtCore import pyqtSignal
+from PyQt6 import QtGui,QtWidgets,QtCore
+from PyQt6.QtCore import pyqtSignal,Qt
+
+
 import os
 
 class CheckBoxDelegate(QtWidgets.QItemDelegate):
-    CHECKBOX_USER_ROLE = QtCore.Qt.UserRole+1001
+    CHECKBOX_USER_ROLE = QtCore.Qt.ItemDataRole.UserRole+1001
     
     def createEditor(self, parent, option, index):
         """ Important, otherwise an editor is created if the user clicks in this cell.
@@ -17,34 +21,34 @@ class CheckBoxDelegate(QtWidgets.QItemDelegate):
             
     def paint(self, painter, option, index):
         checked = index.data(self.CHECKBOX_USER_ROLE)
-        text=index.data(QtCore.Qt.DisplayRole)
+        text=index.data(QtCore.Qt.ItemDataRole.DisplayRole)
         opts = QtWidgets.QStyleOptionButton()
-        opts.state |= QtWidgets.QStyle.State_Active
-        if index.flags() & QtCore.Qt.ItemIsEditable:
-            opts.state |= QtWidgets.QStyle.State_Enabled
+        opts.state |= QtWidgets.QStyle.StateFlag.State_Active
+        if index.flags() & QtCore.Qt.ItemFlag.ItemIsEditable:
+            opts.state |= QtWidgets.QStyle.StateFlag.State_Enabled
         else:
-            opts.state |= QtWidgets.QStyle.State_ReadOnly
+            opts.state |= QtWidgets.QStyle.StateFlag.State_ReadOnly
         if checked:
-            opts.state |= QtWidgets.QStyle.State_On
+            opts.state |= QtWidgets.QStyle.StateFlag.State_On
         else:
-            opts.state |= QtWidgets.QStyle.State_Off
+            opts.state |= QtWidgets.QStyle.StateFlag.State_Off
         opts.rect = option.rect
         opts.textVisible = True
         opts.text=text
-        QtWidgets.QApplication.style().drawControl(QtWidgets.QStyle.CE_CheckBox, opts, painter)
+        QtWidgets.QApplication.style().drawControl(QtWidgets.QStyle.ControlElement.CE_CheckBox, opts, painter)
     
     def editorEvent(self, event, model, option, index):
         """ Change the data in the model and the state of the checkbox if the
         user presses the left mouse button and this cell is editable. Otherwise do nothing.
         """
-        if not (index.flags() & QtCore.Qt.ItemIsEditable):
+        if not (index.flags() & QtCore.Qt.ItemFlag.ItemIsEditable):
             return False
-        if event.button() == QtCore.Qt.LeftButton:
-            if event.type() == QtCore.QEvent.MouseButtonRelease:
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            if event.type() == QtCore.QEvent.Type.MouseButtonRelease:
                 if option.rect.contains(event.pos()):
                     self.setModelData(None, model, index)
                     return True
-            elif event.type() == QtCore.QEvent.MouseButtonDblClick:
+            elif event.type() == QtCore.QEvent.Type.MouseButtonDblClick:
                 if option.rect.contains(event.pos()):
                     return True
         return False
@@ -56,12 +60,12 @@ class CheckBoxDelegate(QtWidgets.QItemDelegate):
         model.setData(index, checked, self.CHECKBOX_USER_ROLE)
     
 class ProgressDelegate(QtWidgets.QStyledItemDelegate):
-    PROGRESS_USER_ROLE = QtCore.Qt.UserRole+1001
+    PROGRESS_USER_ROLE = QtCore.Qt.ItemDataRole.UserRole+1001
     
     def paint(self, painter, option, index):
         progress = index.data(self.PROGRESS_USER_ROLE)
         #the selection
-        if option.state & QtWidgets.QStyle.State_Selected:
+        if option.state & QtWidgets.QStyle.StateFlag.State_Selected:
             painter.fillRect(option.rect, option.palette.highlight());
         else:
             painter.fillRect(option.rect, option.palette.window());
@@ -78,7 +82,7 @@ class ProgressDelegate(QtWidgets.QStyledItemDelegate):
             opt.progress = progress
         opt.text = "{}%".format(progress)
         opt.textVisible = True
-        QtWidgets.QApplication.style().drawControl(QtWidgets.QStyle.CE_ProgressBar, opt, painter)
+        QtWidgets.QApplication.style().drawControl(QtWidgets.QStyle.ControlElement.CE_ProgressBar, opt, painter)
 
 # simple delegate to display the filename only         
 class PathDelegate(QtWidgets.QStyledItemDelegate):
@@ -89,7 +93,7 @@ class PathDelegate(QtWidgets.QStyledItemDelegate):
 Support plain icon delegate
 '''
 class IconDelegate(QtWidgets.QStyledItemDelegate):
-    PROGRESS_USER_ROLE = QtCore.Qt.UserRole+1001
+    PROGRESS_USER_ROLE = QtCore.Qt.ItemDataRole.UserRole+1001
     def __init__(self, icons, parent=None):
         super(IconDelegate, self).__init__(parent)
         self._icons = icons
@@ -103,11 +107,11 @@ class IconDelegate(QtWidgets.QStyledItemDelegate):
         progress = index.data(self.PROGRESS_USER_ROLE)
         icon = self.get_icon(progress)
         #the selection
-        if option.state & QtWidgets.QStyle.State_Selected:
+        if option.state & QtWidgets.QStyle.StateFlag.State_Selected:
             painter.fillRect(option.rect, option.palette.highlight());
         else:
             painter.fillRect(option.rect, option.palette.window());        
-        icon.paint(painter, option.rect, QtCore.Qt.AlignCenter)        
+        icon.paint(painter, option.rect, QtCore.Qt.AlignmentFlag.AlignCenter)        
 
        
 '''
@@ -122,10 +126,11 @@ class DragList(QtWidgets.QTableView):
         QtWidgets.QTableView.__init__(self, parent)
         self.owner=parent        
         self.verticalHeader().hide()
-        self.setSelectionBehavior(self.SelectRows)
-        self.setSelectionMode(self.SingleSelection)
+        #pyqt5 self.setSelectionBehavior(self.SelectRows)
+        self.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
+        self.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
         self.setShowGrid(True)
-        self.setDragDropMode(self.InternalMove)
+        self.setDragDropMode(QtWidgets.QAbstractItemView.DragDropMode.InternalMove)
         self.setDragDropOverwriteMode(False)    
         self.resizeColumnsToContents()    
         self._createContextMenu()
@@ -232,7 +237,7 @@ class DragList(QtWidgets.QTableView):
             return
 
         if event.mimeData().hasUrls():
-            event.setDropAction(QtCore.Qt.CopyAction)
+            event.setDropAction(QtCore.Qt.DropAction.CopyAction)
             event.accept()
         else:
             event.ignore()
@@ -244,7 +249,7 @@ class DragList(QtWidgets.QTableView):
             return
   
         if event.mimeData().hasUrls:
-            event.setDropAction(QtCore.Qt.CopyAction)
+            event.setDropAction(QtCore.Qt.DropAction.CopyAction)
             for url in event.mimeData().urls():
                 urlString = str(url.toLocalFile())
                 self.onDropURL.emit(urlString)
@@ -261,10 +266,12 @@ class DragList(QtWidgets.QTableView):
     def _createContextMenu(self):
         self.contextMenu = QtWidgets.QMenu("Context")
         self.contextMenu.addSeparator()
-        rmAction = QtWidgets.QAction(QtGui.QIcon('icons/del-x.png'), 'Remove', self)
+        #pyqt5 rmAction = QtWidgets.QAction(QtGui.QIcon('icons/del-x.png'), 'Remove', self)
+        rmAction = QtGui.QAction(QtGui.QIcon('icons/del-x.png'), 'Remove', self)
         rmAction.triggered.connect(self._rmItem)
         self.contextMenu.addAction(rmAction)
-        rmAllAction = QtWidgets.QAction(QtGui.QIcon('icons/clear-all.png'), 'Remove all', self)
+        #pyqt5 rmAllAction = QtWidgets.QAction(QtGui.QIcon('icons/clear-all.png'), 'Remove all', self)
+        rmAllAction = QtGui.QAction(QtGui.QIcon('icons/clear-all.png'), 'Remove all', self)
         rmAllAction.triggered.connect(self._rmAllItems)
         self.contextMenu.addAction(rmAllAction)
         self.contextMenu.addSeparator()
@@ -321,7 +328,7 @@ class DragList(QtWidgets.QTableView):
 #dont work right. And must implement for all items in the row!
 # So this pattern is not really usable for dragndrop
 class PathItemXX(QtGui.QStandardItem):
-    ROLE = QtCore.Qt.UserRole+1
+    ROLE = QtCore.Qt.ItemDataRole.UserRole+1
     def __init__(self,another=None):
         QtGui.QStandardItem.__init__(self,another)
         self.path = None
@@ -329,7 +336,7 @@ class PathItemXX(QtGui.QStandardItem):
 
     #only answer your stuff, else it breaks         
     def data(self,userRole):
-        if userRole == QtCore.Qt.DisplayRole:
+        if userRole == QtCore.Qt.ItemDataRole.DisplayRole:
             return self.displayName
         return None
 

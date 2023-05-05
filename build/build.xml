@@ -8,8 +8,10 @@
 		<property name="debTarget" value="DEB"/>
 		<property name="ubu1Build" value="${appName}_${version}+${pkgrelease}~${ubu1}"/>
 		<property name="ubu2Build" value="${appName}_${version}+${pkgrelease}~${ubu2}"/>
+		<property name="ubu3Build" value="${appName}_${version}+${pkgrelease}~${ubu3}"/>
 		<property name="ubu1Target" value="${stage}/${ubu1Build}"/>
-		<property name="ubu2Target" value="${stage}/${ubu2Build}"/>		
+		<property name="ubu2Target" value="${stage}/${ubu2Build}"/>
+		<property name="ubu3Target" value="${stage}/${ubu3Build}"/>				
 
 		<delete dir="${stage}"/>
 		<delete dir="${aurTarget}"/>
@@ -21,6 +23,7 @@
 		<mkdir dir="${debTarget}"/>
 		<mkdir dir="${ubu1Target}"/>
 		<mkdir dir="${ubu2Target}"/>
+		<mkdir dir="${ubu3Target}"/>
 		<property name="source" value="../src"/>
 		<property name="srcIcons" value="${source}/icons"/>
 
@@ -102,7 +105,7 @@
 		</copy>
 		
 		<mkdir dir="${ubu1Target}/addons"/>
-		<mkdir dir="${ubu1Target}/debian"/>
+		<mkdir dir="${ubu1Target}/debian"></mkdir>
 		<mkdir dir="${ubu1Target}/src"/>
 		<copy todir="${ubu1Target}/src/icons">
 			<fileset dir="${srcIcons}">
@@ -152,7 +155,7 @@
 			<filterset>
 			    <filter token="xxx" value="${version}"/>
 			</filterset>
-			<fileset file="${rootDir}FFMPEGTools.py" />
+			<fileset file="${rootDir}/FFMPEGTools.py" />
 		</copy>
 		<chmod file="${ubu2Target}/src/${startApp}" perm="ug+rwx"/>
 		<copy todir="${ubu2Target}/addons">
@@ -166,8 +169,44 @@
 			<arg value="${ubu2Build}"/>
 		</exec>	
 		
-		<delete dir="${stage}"/>		
-	</target>		
+		<!-- DEBBUILD ubu3-->
+		<copy todir="${ubu3Target}">
+			<fileset dir="DEB-template"/>
+			<filterset>
+				<filter token="ubu" value="${ubu3}"/>
+				<filter token="xxx" value="${version}"/>
+				<filter token="xpkgrelx" value="${pkgrelease}"/>
+				<filter token="xtsx" value="${time.stamp}"/>				
+			</filterset>			
+			
+		</copy>
+		<mkdir dir="${ubu3Target}/addons"/>
+		<mkdir dir="${ubu3Target}/debian"/>
+		<mkdir dir="${ubu3Target}/src"/>
+		<copy todir="${ubu3Target}/src/icons">
+			<fileset dir="${srcIcons}">
+			</fileset>
+		</copy>		
+		<copy todir="${ubu3Target}/src">
+			<fileset file="${source}/*.py" />
+			<filterset>
+			    <filter token="xxx" value="${version}"/>
+			</filterset>
+			<fileset file="${rootDir}/FFMPEGTools.py" />
+		</copy>
+		<chmod file="${ubu3Target}/src/${startApp}" perm="ug+rwx"/>
+		<copy todir="${ubu3Target}/addons">
+			<fileset file="*.desktop"/>
+		</copy>
+
+		<exec executable="tar" output="/dev/null" os="Linux">
+			<arg value="-cp"/>
+			<arg value="--file=${debTarget}/${ubu3Build}.tar"/>
+			<arg value="--directory=${stage}"/>
+			<arg value="${ubu3Build}"/>
+		</exec>	
 		
+		<delete dir="${stage}"/>		
+	</target>			
 	
 </project>			

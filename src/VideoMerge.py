@@ -17,9 +17,13 @@ Created on Apr 16, 2020
 @author: kanehekili
 '''
 import sys,traceback,os,getopt
-from PyQt5 import QtGui,QtWidgets,QtCore
-from PyQt5.QtWidgets import QApplication
-from PyQt5.QtCore import pyqtSignal,pyqtSlot
+#from PyQt5 import QtGui,QtWidgets,QtCore
+#from PyQt5.QtWidgets import QApplication
+#from PyQt5.QtCore import pyqtSignal,pyqtSlot
+from PyQt6 import QtGui,QtWidgets,QtCore
+from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import pyqtSignal,pyqtSlot
+
 from DragnDropTableWidget import DragList,IconDelegate,PathDelegate,ProgressStatusBar
 
 import mimetypes
@@ -58,7 +62,7 @@ class VideoMerge(QtWidgets.QMainWindow):
         self.init_toolbar()
      
         frame1 = QtWidgets.QFrame()
-        frame1.setFrameStyle(QtWidgets.QFrame.Panel | QtWidgets.QFrame.Sunken)
+        frame1.setFrameStyle(QtWidgets.QFrame.Shape.Panel | QtWidgets.QFrame.Shadow.Sunken)
         
         dlgBox = QtWidgets.QVBoxLayout() 
         dlgBox.setContentsMargins(2, 1, 3, 1) #left top right bottom
@@ -71,8 +75,8 @@ class VideoMerge(QtWidgets.QMainWindow):
         self.listWidget.setHeaders(["File", "Progress"])
         self.listWidget.setItemDelegateForColumn(0,PathDelegate(self))
         self.listWidget.setItemDelegateForColumn(1,IconDelegate(self.statusIcons))
-        self.listWidget.setSectionResizeMode(0,QtWidgets.QHeaderView.Stretch)
-        self.listWidget.setSectionResizeMode(1,QtWidgets.QHeaderView.ResizeToContents)
+        self.listWidget.setSectionResizeMode(0,QtWidgets.QHeaderView.ResizeMode.Stretch)
+        self.listWidget.setSectionResizeMode(1,QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
         self.listWidget.setToolTip("Drag files with SAME codec here")
         #Filter to ensure the correct files are dragged and dropped
         self.listWidget.setDragFilter(self._onDropped)
@@ -98,7 +102,7 @@ class VideoMerge(QtWidgets.QMainWindow):
         wid = QtWidgets.QWidget(self)
         self.setCentralWidget(wid)        
         wid.setLayout(dlgBox)
-        self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Expanding)
         self.setMinimumSize(400, 0)
         self.centerWindow()
     
@@ -122,16 +126,16 @@ class VideoMerge(QtWidgets.QMainWindow):
     
 
     def init_toolbar(self):
-        self.startAction = QtWidgets.QAction(QtGui.QIcon('./icons/start-icon.png'), 'Start Concat', self)
+        self.startAction = QtGui.QAction(QtGui.QIcon('./icons/start-icon.png'), 'Start Concat', self)
         self.startAction.setShortcut('Ctrl+M')
         self.startAction.triggered.connect(self.startMerge)
 
-        self.stopAction = QtWidgets.QAction(QtGui.QIcon('./icons/stop-red-icon.png'), 'Stop', self)
+        self.stopAction = QtGui.QAction(QtGui.QIcon('./icons/stop-red-icon.png'), 'Stop', self)
         self.stopAction.setShortcut('Ctrl+H')
         self.stopAction.triggered.connect(self.stopMerge)
         self.stopAction.setEnabled(False)
         
-        self.mediaSettings = QtWidgets.QAction(QtGui.QIcon('./icons/settings.png'), "Settings", self)
+        self.mediaSettings = QtGui.QAction(QtGui.QIcon('./icons/settings.png'), "Settings", self)
         self.mediaSettings.setShortcut('Ctrl+T')
         self.mediaSettings.triggered.connect(self.openMediaSettings)
         
@@ -144,23 +148,25 @@ class VideoMerge(QtWidgets.QMainWindow):
   
     def centerWindow(self):
         frameGm = self.frameGeometry()
-        screen = QApplication.desktop().screenNumber(QApplication.desktop().cursor().pos())
-        centerPoint = QApplication.desktop().screenGeometry(screen).center()
+        #pyqt5 screen = QApplication.desktop().screenNumber(QApplication.desktop().cursor().pos())
+        #pyqt5 screen = QApplication.desktop().screenNumber(QApplication.desktop().cursor().pos())
+        #pyqt5 centerPoint = QApplication.desktop().screenGeometry(screen).center()
+        centerPoint=QtGui.QGuiApplication.primaryScreen().availableGeometry().center()
         frameGm.moveCenter(centerPoint)
         self.move(frameGm.topLeft())
 
     def getMessageDialog(self, text, infoText):
         # dlg = DialogBox(self)
         dlg = QtWidgets.QMessageBox(self)
-        dlg.setIcon(QtWidgets.QMessageBox.Information)
-        dlg.setWindowModality(QtCore.Qt.WindowModal)
+        dlg.setIcon(QtWidgets.QMessageBox.Icon.Information)
+        dlg.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
         dlg.setWindowTitle("Notice")
         dlg.setText(text)
         dlg.setInformativeText(infoText)
-        dlg.setStandardButtons(QtWidgets.QMessageBox.Ok)
+        dlg.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Ok)
         #dlg.standardButtons.accepted.connect(self.accept)
         # Workaround to resize a qt dialog. WTF!
-        spacer = QtWidgets.QSpacerItem(300, 0, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding)
+        spacer = QtWidgets.QSpacerItem(300, 0, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
         layout = dlg.layout()
         layout.addItem(spacer, layout.rowCount(), 0, 1, layout.columnCount())
         # dlg.setMinimumSize(450, 0)
@@ -320,11 +326,13 @@ class SettingsDialog(QtWidgets.QDialog):
         self.init_ui()
 
     def init_ui(self):
-        self.setWindowModality(QtCore.Qt.WindowModal)
+        #pyqt5 self.setWindowModality(QtCore.Qt.WindowModal)
+        self.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
         self.setWindowTitle("Settings")
 
         frame1 = QtWidgets.QFrame()
-        frame1.setFrameStyle(QtWidgets.QFrame.Box | QtWidgets.QFrame.Sunken)
+        #pyqt5 frame1.setFrameStyle(QtWidgets.QFrame.Box | QtWidgets.QFrame.Sunken)
+        frame1.setFrameStyle(QtWidgets.QFrame.Shape.Box | QtWidgets.QFrame.Shadow.Sunken)
         frame1.setLineWidth(1)
 
         encodeBox = QtWidgets.QVBoxLayout(frame1)
@@ -341,7 +349,8 @@ class SettingsDialog(QtWidgets.QDialog):
         self.check_rotation.stateChanged.connect(self.on_rotationChanged)
         outBox = QtWidgets.QVBoxLayout()
         # outBox.addStretch(1)
-        self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+        #pyqt5 self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Expanding)
         versionBox = QtWidgets.QHBoxLayout()
         lbl = QtWidgets.QLabel("Version:")
         ver = QtWidgets.QLabel(Version)
@@ -357,10 +366,10 @@ class SettingsDialog(QtWidgets.QDialog):
         self.setMinimumSize(400, 0)
         
     def on_reencodeChanged(self, reencode):
-        self.model.reencode = QtCore.Qt.Checked == reencode
+        self.model.reencode = QtCore.Qt.CheckState.Checked == reencode
 
     def on_rotationChanged(self, rotation):
-        self.model.noRotation = QtCore.Qt.Checked == rotation
+        self.model.noRotation = QtCore.Qt.CheckState.Checked == rotation
 
         
 class LongRunningOperation(QtCore.QThread):
@@ -512,8 +521,8 @@ class VideoAttributes():
             return self.NAMES[1]
         
         noTS= not(self.isTS() or otherCA.isTS())
-        if noTS and self.fps() != otherCA.fps(): #ignore fps on TS streams
-            #if self.fps<100 and otherCA<100:
+        delta = abs(self.fps()-otherCA.fps())
+        if noTS and  delta>4: #ignore fps on TS streams
             return self.NAMES[2]
         #if self.rotation != otherCA.rotation:
         #    return self.NAMES[3]
@@ -951,7 +960,7 @@ def main():
         win = VideoMerge(res)
         
         win.show()
-        code = app.exec_()
+        code = app.exec()
         log.info("Close Session")
         return code
     except:

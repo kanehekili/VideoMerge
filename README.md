@@ -1,7 +1,7 @@
 # VideoMerge
-Version 1.0.2
+Version 2.0.0
 
-![Download](https://github.com/kanehekili/VideoMerge/releases/download/1.0.2/videomerge1.0.2.tar)
+![Download](https://github.com/kanehekili/VideoMerge/releases/download/2.0.0/videomerge2.0.0.tar)
 
 UI Tool to merge different videos using ffmpeg
 Supports the (fast) merge of homogenius streams as well as (slower) reencoding different file formats. 
@@ -73,6 +73,9 @@ sudo apt install --no-install-recommends install videomerge
 ```
 
 ## Changes
+05.05.2023
+* Fixed fps recognition, Ubuntu build changes, Switch to QT6
+
 20.12.2022
 * Path fixes
 
