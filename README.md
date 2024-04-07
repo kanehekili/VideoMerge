@@ -18,7 +18,7 @@ Different rotated videos will be made "homogenious", see the limitations for mor
 ### Prerequisites
 * python3
 * ffmpeg
-* python3-pyqt5 on Debian and derivatives
+* python3-pyqt6 on Debian and derivatives
 
 #### Set GTK Theme for this QT application
 If you are running a DE with GTK/Gnome (as opposed to LXQT or KDE) you need to tweak your system:
