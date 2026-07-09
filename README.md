@@ -28,9 +28,12 @@ If you are running a DE with GTK/Gnome (as opposed to LXQT or KDE) you need to t
 
 add the following line:
 
-`QT_QPA_PLATFORMTHEME=gtk2`
+`QT_QPA_PLATFORMTHEME=gtk2` or `QT_QPA_PLATFORMTHEME=gtk3`
 
 and logout/login (or reboot)
+
+Ubuntu/debain systems will need:
+qt6-gtk-platformtheme
 
 
 ## Limitations
@@ -56,7 +59,7 @@ Merging videos is complex, since there are many variations. If you encounter a p
 
 
 ### Arch Linux
-#### Install VideomERGE via AUR - Arch Linux and derivates only(Manjaor/Endeavour) 
+#### Install Videomerge via AUR - Arch Linux and derivates only(Manjaor/Endeavour) 
 * Use pamac or other GUI tools, search for "videomerge" in AUR, click install
 * Manually :
     * Download [PKGBUILD ](https://aur.archlinux.org/cgit/aur.git/tree/PKGBUILD?h=videomerge)
@@ -73,6 +76,9 @@ sudo apt install --no-install-recommends install videomerge
 ```
 
 ## Changes
+09.07.2026
+* Imply extension for result file. Change stream recognition
+
 05.05.2023
 * Fixed fps recognition, Ubuntu build changes, Switch to QT6
 

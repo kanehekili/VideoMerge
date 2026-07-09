@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# copyright (c) 2022 kanehekili (mat.wegmann@gmail.com)
+# copyright (c) 2022-2024 kanehekili (kanehekili.media@gmail.com)
 # This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License,
 # as published by the Free Software Foundation, either version 2 of the License, or (at your option) any
 # later version.
@@ -17,9 +17,6 @@ Created on Apr 16, 2020
 @author: kanehekili
 '''
 import sys,traceback,os,getopt
-#from PyQt5 import QtGui,QtWidgets,QtCore
-#from PyQt5.QtWidgets import QApplication
-#from PyQt5.QtCore import pyqtSignal,pyqtSlot
 from PyQt6 import QtGui,QtWidgets,QtCore
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import pyqtSignal,pyqtSlot
@@ -31,8 +28,7 @@ import subprocess
 import datetime
 import re
 import FFMPEGTools
-from FFMPEGTools import FFStreamProbe,OSTools
-from fractions import Fraction
+from FFMPEGTools import FFStreamProbe,OSTools,FORMATS
 import glob
 
 
@@ -52,9 +48,15 @@ class VideoMerge(QtWidgets.QMainWindow):
         log.info("Start session")             
         self.setWindowIcon(getAppIcon()) #Titlebar icon only!
         self.mimeHelper = MimeHelper()
+        self.sigCache = SignatureCache()
+        self.probeWorker=ProbeOperation(self,self.sigCache)
+        self.probeWorker.finished.connect(self._onProbeDone)
+        self.mergeMode=None
+        self.mergeReason="Idle"
         self._generateStatusIcons()
         self.init_ui()
         self.merger=None
+        self.worker=None
         self.settings=SettingsModel()
     
     def init_ui(self):
@@ -77,7 +79,7 @@ class VideoMerge(QtWidgets.QMainWindow):
         self.listWidget.setItemDelegateForColumn(1,IconDelegate(self.statusIcons))
         self.listWidget.setSectionResizeMode(0,QtWidgets.QHeaderView.ResizeMode.Stretch)
         self.listWidget.setSectionResizeMode(1,QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
-        self.listWidget.setToolTip("Drag files with SAME codec here")
+        self.listWidget.setToolTip("Drag video files here - streams are analyzed automatically")
         #Filter to ensure the correct files are dragged and dropped
         self.listWidget.setDragFilter(self._onDropped)
         self.listWidget.onRemove.connect(self._onRemove)
@@ -193,17 +195,12 @@ class VideoMerge(QtWidgets.QMainWindow):
     '''
 
     def _onDropped(self,mimeData):
-        ok = self.mimeHelper.isValidUrl(mimeData)
-        if not ok:
-            return False
-        #self._displayHomogeniousState()  
-        return True    
+        return self.mimeHelper.isValidUrl(mimeData)
 
     def _onRemove(self,anIndex):
-        if anIndex==None:
-            return self._endMergeUI()
-
-        self._displayHomogeniousState()
+        if anIndex is None:
+            self._endMergeUI()
+        self._updateMergeMode()
     
     def _onMergeProgress(self,percent):
         QtCore.QCoreApplication.processEvents()
@@ -213,36 +210,65 @@ class VideoMerge(QtWidgets.QMainWindow):
         else:
             print("Progress: %d now: %d"%(percent,curr))
     
-    def _displayHomogeniousState(self):
+    '''
+    probes the streams of all listed files (in background if not cached yet)
+    and displays the resulting merge mode
+    '''
+    def _updateMergeMode(self):
         pathItems=self.listWidget.allColumnItems(0)
-        listOfUrls=(entry.text() for entry in pathItems) #that genrator only works once
-        #TODO TEST 
-        #for eintrag in listOfUrls:
-        #    print("#2",eintrag)
-        self.mimeHelper.checkListIfHomogenious(listOfUrls)
-        
-        if not self.mimeHelper.homogenious:
-            self._showStatus("Inhomogenious - merge by reencoding")
-        else:
-            self._showStatus("Homogenious - fast merge ")          
-                
+        paths=[entry.text() for entry in pathItems]
+        if len(paths)==0:
+            self.mergeMode=None
+            self._showStatus("Idle")
+            return
+        missing = self.sigCache.missing(paths)
+        if missing:
+            self.mergeMode=None
+            self._showStatus("Analyzing streams...")
+            self._startProbe(missing)
+            return
+        broken=[os.path.basename(p) for p in paths if self.sigCache.get(p) is None]
+        if broken:
+            self.mergeMode=Merger.MODE_IMPOSSIBLE
+            self.mergeReason="Can't probe: "+", ".join(broken)
+            self._showStatus(self.mergeReason)
+            return
+        signatures=[self.sigCache.get(p) for p in paths]
+        self.mergeMode,self.mergeReason = decideMergeMode(signatures,self.settings)
+        self._showStatus(self.mergeReason)
+
+    def _startProbe(self,paths):
+        self.probeWorker.probe(paths) #ignored while busy - finished triggers a recheck
+
+    @pyqtSlot()
+    def _onProbeDone(self):
+        self._updateMergeMode()
+
     def startMerge(self):
         cnt = range(self.listWidget.count())
         if len(cnt)==0:
             self.getMessageDialog("<b>Clumsy fingers</b>", "No files added?").show()
+            return
+        self._updateMergeMode() #settings may have changed - cheap, signatures are cached
+        if self.mergeMode is None:
+            self.getMessageDialog("Analyzing", "Still probing the files - try again in a moment").show()
+            return
+        if self.mergeMode == Merger.MODE_IMPOSSIBLE:
+            self.getMessageDialog("Can't merge", self.mergeReason).show()
             return
         mel=[]
         #create MergeEntry for each row
         for indx in cnt:
             me = MergeEntry(self.listWidget.items(indx))
             mel.append(me)
-            
-        self.merger = Merger(mel,self.mimeHelper.homogenious,self.settings)
+
+        self.merger = Merger(mel,self.mergeMode,self.sigCache,self.settings)
         self.merger.onProgress.connect(self._onMergeProgress)
         self.merger.onStatus.connect(self._showStatus)
         targetFile = self.getTargetFile(self.merger)
         if targetFile is None:
             return
+        self.merger.adaptToTarget(targetFile)
         self.worker=LongRunningOperation(self._asyncMerge,targetFile)
         self.worker.finished.connect(self._endMergeUI)
         self.worker.noGood.connect(self._noGood)
@@ -256,9 +282,21 @@ class VideoMerge(QtWidgets.QMainWindow):
     
     def getTargetFile(self,merger):
         targetPath = merger.getTargetPath()
-        result = QtWidgets.QFileDialog.getSaveFileName(parent=self, directory=targetPath, caption="Save Video");
+        firstFile = merger.mergeList[0].getText()
+        ext = os.path.splitext(firstFile)[1]  #fallback: keep the source extension
+        filterStr = "Video (*{});;All files (*)".format(ext) if ext else "All files (*)"
+        sig = self.sigCache.get(firstFile)
+        if sig is not None:
+            best = sig.probe.getTargetExtension() #container that fits the codecs
+            if best:
+                ext = "."+best
+                filterStr = "Video ({});;All files (*)".format(sig.probe.getDialogFileExtensions())
+        proposal = os.path.join(targetPath,"merge"+ext)
+        result = QtWidgets.QFileDialog.getSaveFileName(parent=self, directory=proposal, caption="Save Video", filter=filterStr)
         if result[0]:
             fn = result[0]
+            if ext and not os.path.splitext(fn)[1]:
+                fn += ext
             return fn
         return None
     
@@ -267,6 +305,19 @@ class VideoMerge(QtWidgets.QMainWindow):
             self._showStatus("Invalid condition, process not found")
             return
         self.merger.interrupt()
+
+    #stop ffmpeg and the worker threads before the window dies
+    def closeEvent(self,event):
+        if self.merger is not None:
+            self.merger.interrupt()
+        try:
+            if self.worker is not None and self.worker.isRunning():
+                self.worker.wait(5000)
+        except RuntimeError:
+            pass #thread object already deleted - nothing to wait for
+        if self.probeWorker.isRunning():
+            self.probeWorker.wait(3000)
+        event.accept()
     
     def openMediaSettings(self):
         dlg = SettingsDialog(self, self.settings) 
@@ -286,7 +337,7 @@ class VideoMerge(QtWidgets.QMainWindow):
 #         cb = QtGui.QStandardItem()
 #         cb.setData(True,CheckBoxDelegate.CHECKBOX_USER_ROLE)
         self.listWidget.addItems([item,pb])
-        self._displayHomogeniousState()
+        self._updateMergeMode()
     
   
     '''
@@ -415,8 +466,9 @@ class MergeEntry():
         self.progress.setData(state,IconDelegate.PROGRESS_USER_ROLE)
 
 '''
- evaluates if the path is valid and the file can be processed. If homogenious-fast merge possible, else a reencode is needed
-'''           
+ evaluates if the path may be processed at all - a cheap extension check
+ before the streams are probed by the SignatureCache
+'''
 class MimeHelper():
     def __init__(self):
         mimetypes.init()
@@ -424,15 +476,11 @@ class MimeHelper():
         mimetypes.add_type("video/mp2t",".m2ts",True)
         mimetypes.add_type("video/mp2t",".ts",True)
         mimetypes.add_type("video/mp2t",".mts",True)
-        self.reset()
-        self.homogenious=True
-        self.referenceMimeString=None
-        
+
     def isValidUrl(self,mimeData):
         if not mimeData:
-            self.reset()
             return False
-        
+
         if not mimeData.hasUrls():
             return False
         urls = mimeData.urls()
@@ -443,112 +491,192 @@ class MimeHelper():
                 return False
         return True
 
-    #check after sth has been removed - we do not know whats in that list...
-    def checkListIfHomogenious(self,listofUrls):
-        self.referenceMimeString=None
-        for url in listofUrls:
-            log.debug("mimehelper testing %s:",url)
-            self._evaluateFile(url)
-                
-        '''
-        refMime=None
-        for url in listofUrls:
-            mimeType = mimetypes.guess_type(url)
-            if refMime is None:
-                refMime=mimeType
-            if not mimeType == refMime:
-                return False
-        return True
-        '''    
-    
     def _evaluateMime(self,aQUrl):
         if aQUrl.isLocalFile() and len(aQUrl.fileName())>0:
-            return self._evaluateFile(aQUrl.fileName())
+            types = mimetypes.guess_type(aQUrl.fileName())
+            log.debug("mime:%s",types[0])
+            return types[0] is not None and "video" in types[0]
         return False
 
-    def _evaluateFile(self,urlString):
-        types = mimetypes.guess_type(urlString)
-        log.debug("mime:%s",types[0])
-        if types[0] is not None and "video" in types[0]:
-            if self.referenceMimeString is None:
-                self.referenceMimeString = types[0]
-            if types[0] == self.referenceMimeString:  
-                self.homogenious=True
-            else:
-                self.homogenious=False
-            return True
-        return False
+'''
+Copy-concat compatibility fingerprint of one video file. Everything that must
+match for a stream-copy concat lives in "data", so comparing two files is a
+loop and the mismatch report names the offending fields.
+'''
+class StreamSignature():
+    FPS_TOLERANCE = 0.5
 
-
-    def reset(self):
-        self.singleMimeString=None;
-
-class VideoAttributes():
-    #WIDTH=0
-    #HEIGHT=1
-    #FPS=2
-    #ROTATION=3
-    #NAMES={"WIDTH":0,"HEIGHT":1,"FPS":2,"ROTATION":3}
-    NAMES=["WIDTH","HEIGHT","FPS","ROTATION"]
-    
     def __init__(self,path,frameProbe):
+        self.src=path
         self.probe=frameProbe
-        self.video = frameProbe.getVideoStream()
-        self.audio = frameProbe.getAudioStream() #might be None
-        self.info = frameProbe.formatInfo
-        self.src=path    
-        '''
-        self.src=src
-        self.width=w
-        self.height=h
-        self.fps=fps
-        self.rotation=rot
-        self.needTS=tsInfo
-        self.isTS=isTS
-    
-    #video.getWidth(),video.getHeight(),video.saneFPS(),video.getRotation(),needsTS,isTS
-                isTS= fmt.isTransportStream()
-            needsTS = fmt.isMP4Container() #TODO To be tested with mkv - maybe h264 is the quesiton
-            if needsTS:
-                print("File needs to be TS!")
+        video = frameProbe.getVideoStream()
+        if video is None:
+            raise ValueError("No video stream in "+path)
+        audio = frameProbe.getAudioStream() #might be None
+        vd = video.dataDict #every ffprobe field is in there
+        self.data = {
+            "vcodec": video.getCodec(),
+            "width": int(video.getWidth()),
+            "height": int(video.getHeight()),
+            "pix_fmt": vd.get("pix_fmt"),
+            "field_order": self._saneFieldOrder(vd),
+            "sar": self._saneSAR(vd),
+            "rotation": video.getRotation() % 360,
+            "acodec": None, "sample_rate": None, "channels": None,
+        }
+        if audio is not None:
+            self.data["acodec"] = audio.getCodec()
+            self.data["sample_rate"] = audio.sampleRate()
+            self.data["channels"] = audio.audioChannels()
+        self.audio=audio
+        self._fps = video.saneFPS()
+        self.timeBase = video.getTimeBase()
+        self.duration = frameProbe.formatInfo.getDuration()
 
-    '''
-            
-    def homogenious(self,otherCA):
-        if self.width() != otherCA.width():
-            return self.NAMES[0]
-        if self.height() != otherCA.height():
-            return self.NAMES[1]
-        
-        noTS= not(self.isTS() or otherCA.isTS())
-        delta = abs(self.fps()-otherCA.fps())
-        if noTS and  delta>4: #ignore fps on TS streams
-            return self.NAMES[2]
-        #if self.rotation != otherCA.rotation:
-        #    return self.NAMES[3]
-        return None
-    
-    def hasCompatibleRotation(self,otherCA):
-        delta = abs(self.rotation() - otherCA.rotation())
-        return delta != 90 
-    
+    def _saneFieldOrder(self,dataDict):
+        fo = dataDict.get("field_order")
+        if fo is None or fo == "unknown":
+            return "progressive"
+        return fo
+
+    #"0:1" means unspecified - same as the default 1:1
+    def _saneSAR(self,dataDict):
+        sar = dataDict.get("sample_aspect_ratio")
+        if sar is None or sar == "0:1":
+            return "1:1"
+        return sar
+
+    '''names of the fields that forbid a stream-copy concat with other. Empty list = compatible'''
+    def mismatches(self,other):
+        diffs = [key for key in self.data if self.data[key] != other.data[key]]
+        noTS = not(self.isTS() or other.isTS()) #ignore fps on TS streams
+        if noTS and abs(self._fps - other._fps) > self.FPS_TOLERANCE:
+            diffs.append("fps")
+        return diffs
+
+    '''dimensions as presented to the viewer - coded dims swapped on 90/270 rotation'''
+    def displayDims(self):
+        if self.data["rotation"] % 180:
+            return (self.data["height"],self.data["width"])
+        return (self.data["width"],self.data["height"])
+
+    def isPortraitVsLandscape(self,other):
+        (w1,h1) = self.displayDims()
+        (w2,h2) = other.displayDims()
+        return (w1 > h1) != (w2 > h2)
+
+    def hasAudio(self):
+        return self.data["acodec"] is not None
+
+    def audioRate(self):
+        return self.data["sample_rate"] or 48000
+
+    def audioLayout(self):
+        if self.audio is not None:
+            return self.audio.dataDict.get("channel_layout","stereo")
+        return "stereo"
+
+    def codec(self):
+        return self.data["vcodec"]
+
     def fps(self):
-        return self.video.saneFPS()
+        return self._fps
 
     def rotation(self):
-        return self.video.getRotation()
+        return self.data["rotation"]
 
     def needsTS(self):
         return self.probe.isMP4Container()
-    
+
     def isTS(self):
         return self.probe.isTransportStream()
-    
+
     def height(self):
-        return self.video.getHeight()
-    
+        return str(self.data["height"])
+
     def width(self):
-        return self.video.getWidth()
+        return str(self.data["width"])
+
+'''
+Probes video files in its own thread. The built-in QThread "finished" signal
+fires when a batch is done - it is emitted after run() has really returned,
+so the thread may be restarted safely. One instance lives as long as its parent.
+'''
+class ProbeOperation(QtCore.QThread):
+    def __init__(self,parent,cache):
+        QtCore.QThread.__init__(self,parent)
+        self.cache=cache
+        self.paths=[]
+
+    #main thread only. Ignored while busy - "finished" triggers a recheck anyway
+    def probe(self,paths):
+        if self.isRunning():
+            return
+        self.paths=paths
+        self.start()
+
+    def run(self):
+        self.cache.probe(self.paths)
+
+'''
+Caches one StreamSignature per file path. probe() runs inside the
+ProbeOperation thread - it must not touch any Qt UI objects.
+'''
+class SignatureCache():
+    INVALID="invalid"
+
+    def __init__(self):
+        self._cache={}
+
+    def probe(self,pathList):
+        for path in pathList:
+            if path in self._cache:
+                continue
+            try:
+                self._cache[path] = StreamSignature(path,FFStreamProbe(path))
+            except Exception:
+                log.exception("Can't probe %s",path)
+                self._cache[path] = self.INVALID
+
+    '''paths that have not been probed yet'''
+    def missing(self,pathList):
+        return [path for path in pathList if path not in self._cache]
+
+    '''the signature, or None if the file could not be probed'''
+    def get(self,path):
+        sig = self._cache.get(path)
+        if sig is self.INVALID:
+            return None
+        return sig
+
+#codecs that survive the mpegts intermediate route, with their bitstream filter
+TS_BSF = {"h264":"h264_mp4toannexb", "hevc":"hevc_mp4toannexb"}
+
+'''
+Decides how a list of files can be merged, based on their stream signatures.
+Returns a tuple (Merger.MODE_*, human readable reason)
+'''
+def decideMergeMode(signatures,settings):
+    if len(signatures) < 2:
+        return (Merger.MODE_FAST,"Single file - fast merge")
+    ref = signatures[0]
+    #impossibility dominates any other verdict - check all files first
+    if not settings.noRotation:
+        for sig in signatures[1:]:
+            if ref.isPortraitVsLandscape(sig):
+                return (Merger.MODE_IMPOSSIBLE,"Portrait and landscape can't be joined")
+    for sig in signatures[1:]:
+        diffs = ref.mismatches(sig)
+        if diffs:
+            reason = "%s differs in %s - reencoding"%(os.path.basename(sig.src),", ".join(diffs))
+            return (Merger.MODE_REENCODE,reason)
+    #all streams copy-compatible - pick the safest copy route
+    timescaleDrift = any(sig.timeBase != ref.timeBase for sig in signatures)
+    if ref.needsTS() or timescaleDrift:
+        if ref.codec() in TS_BSF:
+            return (Merger.MODE_TS,"Same streams - merging via transport stream")
+        return (Merger.MODE_REENCODE,"Codec %s can't pass through mpegts - reencoding"%ref.codec())
+    return (Merger.MODE_FAST,"Same streams - fast merge")
 
 class Merger(QtCore.QObject):
     onProgress = pyqtSignal(int)
@@ -562,7 +690,7 @@ class Merger(QtCore.QObject):
     TMP_FILE='/tmp/_merge'
     ROT_FILE='/tmp/_rot'
     
-    def __init__(self,mergeEntryList,fastMode,settings):
+    def __init__(self,mergeEntryList,mergeMode,signatureCache,settings):
         super(Merger, self).__init__()
         self.runningProcess=None
         self.mergeList=mergeEntryList
@@ -570,10 +698,11 @@ class Merger(QtCore.QObject):
         self.timeGen=None
         self.timeMark=None
         self.processed=0
-        #self.fastMode=fastMode #either fast or needs to reencode
-        self.conversionMode=self.MODE_FAST if fastMode and not settings.reencode else self.MODE_REENCODE
+        self.conversionMode=self.MODE_REENCODE if settings.reencode else mergeMode
+        self.interrupted=False
         self.errors=[]
-        self.videoList=[]
+        self.videoList=[] #StreamSignatures, in merge order
+        self.signatureCache=signatureCache
         self.totalTime=0
         self.timeCursor=0 #for multi TS operations like rotatate & mux
         self.settings=settings
@@ -596,72 +725,40 @@ class Merger(QtCore.QObject):
         for mergeEntry in self.mergeList:
             mergeEntry.setProgress(MergeEntry.STATE_WAIT)
             src= mergeEntry.getText()
-            fmt = FFStreamProbe(src)
-            info = fmt.formatInfo
-            video = fmt.getVideoStream()
-            #audio = fmt.getAudioStream() 
-            culm=culm+int(info.getDuration())
-            self.cumulatedSums.append(culm) 
-            log.debug("Checking file %s",src)
-            log.debug("Info dur %s",info.getDuration())
-            log.debug("Info br %s",info.getBitRate())
-            log.debug("Info size %s",info.getSizeKB())
-            log.debug("Info formats %s",info.formatNames())
-            log.debug("Video size: %s @ %s"%(video.getWidth(),video.getHeight()))
-            log.debug("Video fps: %d"%(video.saneFPS()))
-            log.debug("Video rot: %d"%(video.getRotation()))
-  
-            #TODO: pass streamProbe data - CA should do the rest
-            cid = VideoAttributes(src,fmt)
-            self.videoList.append(cid)
-            
+            sig = self.signatureCache.get(src) #probed when the file was dropped
+            if sig is None:
+                raise ValueError("File can't be probed: "+src)
+            culm=culm+int(sig.duration)
+            self.cumulatedSums.append(culm)
+            log.debug("File %s: %s %sx%s @%d fps rot:%d dur:%s",src,sig.codec(),sig.width(),sig.height(),sig.fps(),sig.rotation(),sig.duration)
+            self.videoList.append(sig)
+
         log.info("---Total dur: %d",culm)
         self.totalTime=culm
         self.timeGen=iter(self.cumulatedSums)
         self.timeMark=(next(self.timeGen),0) #tuple: time and merge entry index.
-        self._refineMuxing()
-
-    def isImpossible(self):
-        return self.conversionMode == self.MODE_IMPOSSIBLE
-
-    def _refineMuxing(self):
-        #on ts we might have an fps drop!
-        if self.conversionMode==self.MODE_REENCODE:
-            self.onStatus.emit("Reencoding")
-            return #different containers..
-        #TODO: does the target support the codecs?? astra and moebius do not fit into mkv as example
-        if len(self.videoList)<2:
-            return
-        for i,ca in enumerate(self.videoList[:-1]):
-            adjacent=self.videoList[i+1]
-            val= ca.homogenious(adjacent)
-            if val is not None:
-                log.info("Invalid stream value %s : %s - ignoring file %s"%(val,adjacent,adjacent.src)) #TODO cal.value(key)
-                
-                if not ca.hasCompatibleRotation(adjacent) and self.autoRotate():
-                    self.errors.append("Portrait and Landscape can't be joined")
-                    self.validateDone()
-                    break
-                
-                self.conversionMode=self.MODE_REENCODE #brute force. take the first videoList
-                self.onStatus.emit("Different formats - will reencode all")
-                break
-
-            if ca.needsTS():
-                self.conversionMode=self.MODE_TS
-                self.onStatus.emit("Merging with TS filters")
-                break
 
     def autoRotate(self):
-        return not self.settings.noRotation 
-    
-    def healFPS(self,ref,instance):
-        pass #iterate throught the fps and get the most sane one
-    
+        return not self.settings.noRotation
+
+    '''
+    the user chose the target container - if it can't hold the copied codecs,
+    fall back to reencoding instead of failing mid-merge
+    '''
+    def adaptToTarget(self,targetFile):
+        if self.conversionMode==self.MODE_REENCODE:
+            return
+        fmtMap = FORMATS.fromFilename(targetFile)
+        sig = self.signatureCache.get(self.mergeList[0].getText())
+        if fmtMap is None or not fmtMap.containsCodecs(sig.codec(),sig.data["acodec"]):
+            self.conversionMode=self.MODE_REENCODE
+            self.onStatus.emit("Streams can't be copied into this container - reencoding")
+            log.info("Target %s doesn't support %s/%s - reencode",targetFile,sig.codec(),sig.data["acodec"])
+
     def saveTo(self,targetFile):
            
         targetDir= os.path.dirname(targetFile)
-        mergeFile=targetDir+'content.txt'
+        mergeFile=os.path.join(targetDir,'content.txt')
         #count = len(self.mergeList)
         self.markProcessStart()
         #hook for more variations
@@ -681,9 +778,22 @@ class Merger(QtCore.QObject):
         except Exception as error:
             self.runningProcess= None
             log.exception("SaveTo:")
-          
+
         self._removeIntermediateFiles()
+        if self.interrupted:
+            self._removePartialTarget(targetFile)
+            self.onStatus.emit("Merge stopped")
+            return
         self.validateDone()
+
+    #a stopped ffmpeg leaves an unusable torso
+    def _removePartialTarget(self,targetFile):
+        try:
+            if os.path.exists(targetFile):
+                os.remove(targetFile)
+                log.info("Removed partial target %s",targetFile)
+        except OSError:
+            log.exception("Can't remove partial target %s",targetFile)
 
     '''
         this is the concat demuxer. works with mp4 or mp2, no need for intermediate ts files..
@@ -697,47 +807,49 @@ class Merger(QtCore.QObject):
     '''
     #TODO: find first Sane FPS!
     def commandReencodeMP4Eloquent(self,targetFile):
-        log.info('Reencoding mp4- searching sane FPS')
+        log.info('Reencoding')
         prim=self.videoList[0]
-        darMode=Fraction(int(prim.width()),int(prim.height()))
+        if self.autoRotate():
+            #ffmpeg rotates each input upright on decode - the canvas is prim's display size
+            (w,h) = prim.displayDims()
+        else:
+            (w,h) = (int(prim.width()),int(prim.height()))
+        withAudio = all(sig.hasAudio() for sig in self.videoList)
+        if not withAudio:
+            self.onStatus.emit("Clip without audio found - merging video only")
         cmd1=['ffmpeg', "-hide_banner", "-y"]
-        #for mergeEntry in self.mergeList:
-        for ca in self.videoList:
+        for sig in self.videoList:
+            if not self.autoRotate():
+                cmd1.append("-noautorotate")
             cmd1.append("-i")
-            cmd1.append(ca.src)
+            cmd1.append(sig.src)
         cmd1.append('-filter_complex')
-        indx=0
         cmdString=[]
-        cmdString.append('')
-        #for mergeEntry in self.mergeList:
-        #data must be same on all streams!
-        for ca in self.videoList:
-            cmdString.append("[")
-            cmdString.append(str(indx))
-            cmdString.append(":v]")
-            cmdString.append("scale="+prim.width()+":"+prim.height())
-            cmdString.append(",setdar="+str(darMode.numerator)+"/"+str(darMode.denominator)+",")
-            cmdString.append("fps="+str(prim.fps())+",")
-            rot = str(prim.rotation()) if self.autoRotate() else "0"
-            cmdString.append("rotate="+rot)
-            cmdString.append("[v")
-            cmdString.append(str(indx))
-            cmdString.append("]; ")
-            indx=indx+1
+        #normalize each stream to the "prim" canvas - concat needs equal streams.
+        #the scale keeps the aspect ratio, differing formats are padded, not distorted
+        scalePad = "scale=%d:%d:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,setsar=1"%(w,h,w,h)
+        for indx in range(len(self.videoList)):
+            cmdString.append("[%d:v]"%indx)
+            cmdString.append(scalePad)
+            cmdString.append(",fps="+str(prim.fps()))
+            cmdString.append("[v%d]; "%indx)
+            if withAudio:
+                cmdString.append("[%d:a]aresample=%d,aformat=channel_layouts=%s[a%d]; "%(indx,prim.audioRate(),prim.audioLayout(),indx))
         #build the mapping
-        for indx in range(len(self.mergeList)):
-            cmdString.append("[v")
-            cmdString.append(str(indx))
-            cmdString.append("][")
-            cmdString.append(str(indx))
-            cmdString.append(":a] ")
-
-        cmdString.append("concat=n="+str(len(self.mergeList))+':v=1:a=1 [outv] [outa]')#"
+        for indx in range(len(self.videoList)):
+            cmdString.append("[v%d]"%indx)
+            if withAudio:
+                cmdString.append("[a%d]"%indx)
+        if withAudio:
+            cmdString.append("concat=n="+str(len(self.videoList))+':v=1:a=1 [outv] [outa]')
+        else:
+            cmdString.append("concat=n="+str(len(self.videoList))+':v=1:a=0 [outv]')
         cmd1.append(''.join(cmdString))
         cmd1.append("-map")
         cmd1.append('[outv]')
-        cmd1.append("-map")
-        cmd1.append('[outa]')
+        if withAudio:
+            cmd1.append("-map")
+            cmd1.append('[outa]')
         cmd1.append(targetFile)
         self._runCommand(cmd1, "Reencoding",0)#no time slices. One process
         
@@ -751,22 +863,24 @@ class Merger(QtCore.QObject):
         log.info("Complex TS: rotate, mux & merge")
         fnr=0
         tmpFiles=[]
-        for ca in self.videoList:
+        for sig in self.videoList:
             tempFile=self.TMP_FILE+str(fnr)+".ts"
             rotFile=self.ROT_FILE+str(fnr)+".mp4"
             tmpFiles.append(tempFile)
             fnr+=1
-            srcFile =ca.src
-            if ca.rotation()!=0 and self.autoRotate():
-                cmd=['ffmpeg', "-hide_banner", "-y",'-i',ca.src,"-vf","rotate=0",rotFile]
-                self._runCommand(cmd, "Rotate",self.timeCursor)# 
+            srcFile =sig.src
+            if sig.rotation()!=0 and self.autoRotate():
+                #bake the rotation in: the decoder rotates upright by itself, mpegts can't carry the metadata
+                cmd=['ffmpeg', "-hide_banner", "-y",'-i',sig.src,rotFile]
+                self._runCommand(cmd, "Rotate",self.timeCursor)#
                 srcFile=rotFile
-            
-            cmd=['ffmpeg', "-hide_banner", "-y",'-i',srcFile,"-c","copy","-bsf:v","h264_mp4toannexb","-f","mpegts",tempFile]
+
+            bsf = TS_BSF.get(sig.codec(),"h264_mp4toannexb") #decideMergeMode only picks MODE_TS for these codecs
+            cmd=['ffmpeg', "-hide_banner", "-y",'-i',srcFile,"-c","copy","-bsf:v",bsf,"-f","mpegts",tempFile]
             self._runCommand(cmd, "To transport stream",0)#??? no count % because intermediate
 
-        targetDir= os.path.dirname(targetFile)                    
-        mergeFile=targetDir+'content.txt'       
+        targetDir= os.path.dirname(targetFile)
+        mergeFile=os.path.join(targetDir,'content.txt')
         with open(mergeFile,'w') as aFile:
             aFile.write('ffconcat version 1.0\n') 
             for tmpEntry in tmpFiles:
@@ -775,6 +889,8 @@ class Merger(QtCore.QObject):
         os.remove(mergeFile)
          
     def _runCommand(self,cmd,stage,advanceCount):
+        if self.interrupted:
+            raise InterruptedError("Merge stopped")
         log.info("processing: %s",stage)
         for path in self.executeAsync(cmd,False):
             self.parseAndDispatch(path,advanceCount)
@@ -817,28 +933,7 @@ class Merger(QtCore.QObject):
     Conversion failed!
     Aborted
     '''
-    
-    #flickering problem
-    #same time=ignore
-    #time<prevTime = index+1
-    #time == index-1: ignore
-    '''TODO:
-    > frame= 5619 fps=239 q=-1.0 Lsize=   23551kB time=00:03:07.30 bitrate=1030.0kbits/s dup=1 drop=2 speed=7.96x  total: [187, 206]
-T: 00:03:07.30 index:0 cursor: 187 END:187 list:187,206 proz:90
-
-> frame=    1 fps=0.0 q=-1.0 size=       0kB time=00:00:00.00 bitrate=N/A speed=N/A  total: [187, 206]
-T: 00:00:00.00 index:0 cursor: 0 END:187 list:187,206 proz:0
-
-> frame= 5619 fps=0.0 q=-1.0 Lsize=   25472kB time=00:03:07.30 bitrate=1114.0kbits/s speed=3.33e+03x  total: [187, 206]
-T: 00:03:07.30 index:0 cursor: 187 END:187 list:187,206 proz:90
-
-> frame=    1 fps=0.0 q=0.0 size=       0kB time=00:00:00.23 bitrate=   1.6kbits/s speed=10.4x  total: [187, 206]
-T: 00:00:00.23 index:0 cursor: 0 END:187 list:187,206 proz:0
-
-> frame=  121 fps=0.0 q=29.0 size=     256kB time=00:00:04.07 bitrate= 514.8kbits/s speed=7.79x  total: [187, 206]
-T: 00:00:04.07 index:0 cursor: 4 END:187 list:187,206 proz:1
-
-    '''
+   
     def parseAndDispatch(self,text,advanceCount):
         try:
             m= self.REG_TIME.search(text)
@@ -907,12 +1002,11 @@ T: 00:00:04.07 index:0 cursor: 4 END:187 list:187,206 proz:1
                 log.exception("Error while deleting file: %s ", filePath)
                     
     
-    #invoked by stop button, kill the process...
+    #invoked by stop button or window close. Kills the process and prevents follow-up commands
     def interrupt(self):
-        if self.runningProcess is None:
-            self.onStatus.emit("Can't stop ffmpeg - Proeces not found = Error!")
-        else:
-            self.runningProcess.kill() 
+        self.interrupted=True
+        if self.runningProcess is not None:
+            self.runningProcess.kill()
      
     #connect to ui?
     def warn(self,text):
@@ -955,6 +1049,11 @@ def main():
         #find your files and icons:
         OSTools().setMainWorkDir(folder)
         app = QApplication(sys.argv)
+        # Set the application name (this sets WM_CLASS)
+        app.setApplicationName("VideoMerge")
+        # Link to your desktop file (important for GNOME)
+        app.setDesktopFileName("VideoMerge.desktop")          
+        
         app.setWindowIcon(getAppIcon())
         res = parseOptions(sys.argv)
         win = VideoMerge(res)

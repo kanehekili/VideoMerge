@@ -1,0 +1,6 @@
+/.project
+/.pydevproject
+/.claude/
+__pycache__/
+*.py[cod]
+*.log
